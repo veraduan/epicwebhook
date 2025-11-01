@@ -1,9 +1,10 @@
-// index.ts — Epic Webhook Verification (final version)
+// index.ts — Epic Web Store Webhook Verification (request X-Timestamp not required)
 
 type H = Record<string, string>;
 
 function nowIso() { return new Date().toISOString(); }
 
+// 统一 JSON 响应（带 CORS、X-Timestamp、回显签名与关联ID）
 function json(
   data: unknown,
   status = 200,
@@ -16,7 +17,7 @@ function json(
     "access-control-allow-origin": "*",
     "access-control-allow-headers": "*",
     "access-control-allow-methods": "GET,POST,OPTIONS",
-    // 验证器要求：必须包含
+    // 响应必须包含
     "X-Timestamp": nowIso(),
     ...extra,
   };
@@ -55,7 +56,8 @@ export default {
     const corrId = req.headers.get("X-Epic-Correlation-ID") || undefined;
     const reqSigHeaderPresent = req.headers.has("X-Signature");
     const reqSig = req.headers.get("X-Signature") || "";
-    const reqTs = req.headers.get("X-Timestamp") || "";
+    // 注意：不再强制检查请求里的 X-Timestamp
+    // const reqTs = req.headers.get("X-Timestamp") || "";
 
     if (method === "OPTIONS") return noContent({ reqSig, corrId });
 
@@ -74,18 +76,19 @@ export default {
       const type = String(body?.eventType ?? "");
       const eventId = String(body?.eventId ?? "").trim();
 
-      if (!type) return json({ ok: false, message: "Missing eventType" }, 400, {}, { reqSig, corrId });
-      if (!eventId) return json({ ok: false, message: "Missing eventId" }, 400, {}, { reqSig, corrId });
-      if (!reqTs) return json({ ok: false, message: "Missing X-Timestamp" }, 400, {}, { reqSig, corrId });
+      // ① 必填字段检查（empty eventId 用例期望 400）
+      if (!type)  return json({ ok: false, message: "Missing eventType" }, 400, {}, { reqSig, corrId });
+      if (!eventId) return json({ ok: false, message: "Missing eventId"   }, 400, {}, { reqSig, corrId });
 
+      // ② 签名头：按规则返回 428/401/401
       if (!reqSigHeaderPresent) {
         const code = type === "event-v1-player-id-verification" ? 428 : 401;
         return json({ ok: false, message: "Invalid or missing X-Signature" }, code, {}, { reqSig, corrId });
       }
-
       if (reqSig.trim() === "" || malformedSignature(reqSig))
         return json({ ok: false, message: "Invalid or missing X-Signature" }, 401, {}, { reqSig, corrId });
 
+      // ③ 通过（忽略未知字段）
       return json(
         {
           ok: true,
